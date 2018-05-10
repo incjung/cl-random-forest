@@ -676,6 +676,14 @@
 
 ;;; Global refinement (Classification)
 
+;;;#####
+(defun lfarm-leaf-index-list-task (datamatrix datum-index forest)
+  (lfarm:pmapcar
+    (lambda (dtree)
+      (let ((node (find-leaf (dtree-root dtree) datamatrix datum-index)))
+        (node-leaf-index node)))
+    (forest-dtree-list forest)))
+
 (defun make-refine-vector (forest datamatrix datum-index)
   (let ((index-offset (forest-index-offset forest))
         (n-tree (forest-n-tree forest)))
@@ -689,6 +697,24 @@
                (let ((node (find-leaf (dtree-root dtree) datamatrix datum-index)))
                  (node-leaf-index node)))
              (forest-dtree-list forest))))
+      (let ((sv-index (make-array (forest-n-tree forest) :element-type 'fixnum))
+            (sv-val (make-array (forest-n-tree forest)
+                                :element-type 'double-float :initial-element 1d0)))
+        (declare (type (simple-array fixnum) sv-index)
+                 (type (simple-array double-float) sv-val))
+        (loop for i fixnum from 0 to (1- n-tree)
+              for index fixnum in leaf-index-list
+              do (setf (aref sv-index i) (+ index (aref index-offset i))))
+        (clol.vector:make-sparse-vector sv-index sv-val)))))
+
+(defun make-refine-vector (forest datamatrix datum-index)
+  (let ((index-offset (forest-index-offset forest))
+        (n-tree (forest-n-tree forest)))
+    (declare (optimize (speed 3) (safety 0))
+             (type (simple-array double-float) datamatrix)
+             (type (simple-array fixnum) index-offset)
+             (type fixnum datum-index n-tree))
+    (let ((leaf-index-list (lfarm-leaf-index-list-task datamatrix datum-index forest)))
       (let ((sv-index (make-array (forest-n-tree forest) :element-type 'fixnum))
             (sv-val (make-array (forest-n-tree forest)
                                 :element-type 'double-float :initial-element 1d0)))
@@ -803,6 +829,33 @@
         (clol:sparse-arow-update (svref learners class-id)
                                  (svref sv-vec class-id)
                                  (if (= (aref target datum-id) class-id) 1d0 -1d0))))))
+
+;;######
+(lfarm:deftask pdotimes (class-id len sv-vec refine-dataset learners target)
+  (loop for datum-id fixnum from 0 to (1- len) do
+      (setf (clol.vector:sparse-vector-index-vector (svref sv-vec class-id))
+            (svref refine-dataset datum-id))
+      (clol:sparse-arow-update (svref learners class-id)
+                               (svref sv-vec class-id)
+                               (if (= (aref target datum-id) class-id) 1d0 -1d0)))
+  (svref learners class-id))
+
+(defun train-refine-learner-multiclass (refine-learner refine-dataset target)
+  (let* ((len (length refine-dataset))
+         (n-tree (length (svref refine-dataset 0)))
+         (n-class (clol::one-vs-rest-n-class refine-learner))
+         (learners (clol::one-vs-rest-learners-vector refine-learner))
+         (sv-index (make-array n-tree :element-type 'fixnum :initial-element 0))
+         (sv-val (make-array n-tree :element-type 'double-float :initial-element 1d0))
+         (sv-vec (make-array n-class)))
+    (loop for i fixnum from 0 to (1- n-class) do
+      (setf (svref sv-vec i)
+            (clol.vector:make-sparse-vector sv-index sv-val)))
+    (let ((channel (lfarm:make-channel)))
+      (dotimes (class-id n-class)
+        (lfarm:submit-task channel #'pdotomes class-id len sv-vec refine-dataset learners target)
+        (setf (svref learners class-id) (lfarm:receive-result channel))))
+    ))
 
 ;; dataset: simple vector of refine-dataset
 (defun set-activation-matrix!
