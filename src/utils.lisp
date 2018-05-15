@@ -29,17 +29,34 @@
        (lparallel:pmapc ,fn ,@lsts)
        (mapc ,fn ,@lsts)))
 
+;; (defmacro push-ntimes (n lst &body body)
+;;   (let ((var (gensym)))
+;;     `(if lparallel:*kernel*
+;;          (lparallel:pdotimes (,var ,n)
+;;            (progn
+;;              ,var
+;;              (push (progn ,@body) ,lst)))
+;;          (dotimes (,var ,n)
+;;            (progn
+;;              ,var
+;;              (push (progn ,@body) ,lst))))))
+
 (defmacro push-ntimes (n lst &body body)
+  "choose multi-process/ multi-thread/ single"
   (let ((var (gensym)))
-    `(if lparallel:*kernel*
-         (lparallel:pdotimes (,var ,n)
-           (progn
-             ,var
-             (push (progn ,@body) ,lst)))
-         (dotimes (,var ,n)
-           (progn
-             ,var
-             (push (progn ,@body) ,lst))))))
+    `(if lfarm:*kernel*
+         (progn
+           (format t "lfarm *kernel* : ~A" lfarm:*kernel*)
+           (lfarm:pmapcar (lambda (_) ,@body) (alexandria:iota ,n)))
+         (if lparallel:*kernel*
+             (lparallel:pdotimes (,var ,n)
+               (progn
+                 ,var
+                 (push (progn ,@body) ,lst)))
+             (dotimes (,var ,n)
+               (progn
+                 ,var
+                 (push (progn ,@body) ,lst)))))))
 
 ;;; read
 
