@@ -47,7 +47,7 @@
     `(if lfarm:*kernel*
          (progn
            (format t "lfarm *kernel* : ~A" lfarm:*kernel*)
-           (lfarm:pmapcar (lambda (_) ,@body) (alexandria:iota ,n)))
+           (setf lst (lfarm:pmapcar (lambda (_) ,@body) (alexandria:iota ,n))))
          (if lparallel:*kernel*
              (lparallel:pdotimes (,var ,n)
                (progn
